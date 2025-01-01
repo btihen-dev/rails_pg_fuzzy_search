@@ -109,24 +109,21 @@ bin/rails generate model Role job_title:string department:string person:referenc
 people_data = [
   { last_name: "Smith", first_name: "John", job_title: "Software Engineer",  department: "Product" },
   { last_name: "Johnson", first_name: "John", job_title: "Network Engineer", department: "Operations" },
-...]
+  ...
+]
 
 # Insert Data
 people_data.each do |person_data|
-  person = Person.create(
-    first_name: person_data[:first_name], last_name: person_data[:last_name], birthdate: person_data[:birthdate]
-  )
-  Role.create!(
-    person_id: person.id, job_title: person_data[:job_title], department: person_data[:department]
-  )
+  person = Person.create(first_name: person_data[:first_name], last_name: person_data[:last_name])
+  Role.create!(person_id: person.id, job_title: person_data[:job_title], department: person_data[:department])
 end
 ```
 ---
 
-# Single Table, Single-Column Search
-
-## SQL
+# Single Table, Single-Column Search (SQL)
 ```sql
+bin/rails db
+
 SELECT id, last_name, first_name, similarity(last_name, 'Johns') AS score
   FROM people
   WHERE similarity(last_name, 'Johns') > 0.3
@@ -139,15 +136,29 @@ SELECT id, last_name, first_name, similarity(last_name, 'Johns') AS score
  7  | Johnston  | Emilia    |       0.5
 ```
 
-## Rails
+Interesting and helpful, but we can still do better with multiple columns
+
+---
+
+# Single Table, Single-Column Search (Rails)
 ```ruby
+bin/rails c
+
 compare_string = 'Johns'
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 similarity_calc = "similarity(last_name, #{compare_quoted})"
 
-Person.select("*, #{similarity_calc} AS score")
-      .where("last_name % ?", compare_string)
-      .order("score DESC").limit(3)
+Person.select("last_name, first_name, #{similarity_calc} AS score")
+      .where("last_name % ?", compare_string).order("score DESC").limit(3)
+
+[#<Person:0x000000010c4733f0 id: 2, last_name: "Johnson", first_name: "John", score: 0.5555556>,
+ #<Person:0x0000000119138fc0 id: 6, last_name: "Johnson", first_name: "Emma", score: 0.5555556>,
+ #<Person:0x0000000119138e80 id: 7, last_name: "Johnston", first_name: "Emilia", score: 0.5>]
+
+# SQL version
+SELECT last_name, first_name, similarity(last_name, 'Johns') AS score
+  FROM "people" WHERE (last_name % $1) /* loading for pp */
+  ORDER BY score DESC LIMIT $2  [[nil, "Johns"], ["LIMIT", 3]]
 ```
 ---
 
@@ -156,23 +167,24 @@ Person.select("*, #{similarity_calc} AS score")
 use `CONCAT_WS` to build a single text from multiple db fields
 
 ```ruby
-threshold = 0.2
-compare_string = 'Emily Johns'
+compare_string = 'Emi John'
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 concat_fields = "CONCAT_WS(' ', first_name, last_name)"
 similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
 
-Person.select("*, #{similarity_calc} AS score")
-      .where("#{similarity_calc} > ?", threshold)
-      .order("score DESC")
-      .limit(5)
+Person.select("last_name, first_name, #{similarity_calc} AS score")
+      .where("#{concat_fields} % #{compare_quoted}").order("score DESC").limit(5)
 
-# or
+# we asked for 5 but only 4 matched (because the default threshold is 0.3)
+[#<Person:0x000000011ab51e20 last_name: "Johnston", first_name: "Emilia", score: 0.3888889, id: nil>,
+ #<Person:0x000000011ab51ce0 last_name: "Johnson", first_name: "John", score: 0.3846154, id: nil>,
+ #<Person:0x000000011ab51ba0 last_name: "Johnson", first_name: "Emma", score: 0.375, id: nil>,
+ #<Person:0x000000011ab51a60 last_name: "Smith", first_name: "John", score: 0.33333334, id: nil>]
 
-Person.select("*, #{similarity_calc} AS score")
-      .where("#{concat_fields} % #{compare_quoted}")
-      .order("score DESC")
-      .limit(5)
+# SQL version
+SELECT last_name, first_name, similarity(CONCAT_WS(' ', first_name, last_name), 'Emi John') AS score
+  FROM "people" WHERE (CONCAT_WS(' ', first_name, last_name) % 'Emi John') /* loading for pp */
+  ORDER BY score DESC LIMIT $1  [["LIMIT", 5]]
 ```
 
 ---
@@ -187,18 +199,81 @@ compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 concat_fields = "CONCAT_WS(' ', first_name, last_name, job_title, department)"
 similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
 
-Person.joins(:roles)
-      .select("*, #{similarity_calc} AS score")
-      .order("score DESC")
-      .limit(3)
+# with two tables (if we want an accurate id, we need to select which table id we want)
+Person.select("person_id, last_name, first_name, job_title, department, #{similarity_calc} AS score")
+      .joins(:roles).where("#{concat_fields} % #{compare_quoted}").order("score DESC").limit(3)
 
-# or
+# we asked for 3 but only 2 matched (because the default threshold is 0.3)
+[#<Person:0x000000011a977e60 person_id: 7, last_name: "Johnston", first_name: "Emilia",
+  job_title: "Data Scientist", department: "Research", score: 0.52272725, id: nil>,
+ #<Person:0x000000011a977d20 person_id: 6, last_name: "Johnson", first_name: "Emma",
+   job_title: "Data Scientist", department: "Research", score: 0.4883721, id: nil>]
 
-Person.joins(:roles)
-      .select("*, #{similarity_calc} AS score")
-      .where("#{concat_fields} % #{compare_quoted}")
-      .order("score DESC")
-      .limit(3)
+# SQL version
+SELECT person_id, last_name, first_name, job_title, department,
+  similarity(CONCAT_WS(' ', first_name, last_name, job_title, department), 'Emily, a research scientist') AS score
+  FROM "people" INNER JOIN "roles" ON "roles"."person_id" = "people"."id"
+  WHERE (CONCAT_WS(' ', first_name, last_name, job_title, department) % 'Emily, a research scientist') /* loading for pp */
+  ORDER BY score DESC LIMIT $1  [["LIMIT", 3]]
+```
+
+---
+
+# Custom Threshhold
+
+Change the threshold for a match, using `where("#{similarity_calc} > ?", threshold)`
+
+```ruby
+threshold = 0.5
+compare_string = 'Emily, a research scientist'
+compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
+concat_fields = "CONCAT_WS(' ', first_name, last_name, job_title, department)"
+similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
+
+Person.select("person_id, last_name, first_name, job_title, department, #{similarity_calc} AS score")
+      .joins(:roles).where("#{similarity_calc} > ?", threshold).order("score DESC")
+
+[#<Person:0x000000011ab92948 person_id: 7, last_name: "Johnston", first_name: "Emilia",
+  job_title: "Data Scientist", department: "Research", score: 0.52272725, id: nil>]
+
+# SQL version
+SELECT person_id, last_name, first_name, job_title, department,
+  similarity(CONCAT_WS(' ', first_name, last_name, job_title, department), 'Emily, a research scientist') AS score
+  FROM "people" INNER JOIN "roles" ON "roles"."person_id" = "people"."id"
+  WHERE (similarity(CONCAT_WS(' ', first_name, last_name, job_title, department), 'Emily, a research scientist') > $1) /* loading for pp */
+  ORDER BY score DESC LIMIT $2  [[nil, 0.5], ["LIMIT", 11]]
+```
+
+---
+
+## Simplification
+
+If you know how many top matches you want you can use `order` and `limit` instead of `where`
+
+```ruby
+compare_string = 'Emily, a research scientist'
+compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
+concat_fields = "CONCAT_WS(' ', first_name, last_name, job_title, department)"
+similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
+
+Person.select("*, #{similarity_calc} AS score").joins(:roles).order("score DESC").limit(1)
+
+[#<Person:0x000000011a97dae0
+  id: 7,
+  last_name: "Johnston",
+  first_name: "Emilia",
+  birthdate: "1966-01-01",
+  created_at: "2024-10-31 18:30:08.788015000 +0000",
+  updated_at: "2024-10-31 18:30:08.788015000 +0000",
+  job_title: "Data Scientist",
+  department: "Research",
+  person_id: 7,
+  score: 0.52272725>]
+
+# SQL version
+SELECT *, similarity(CONCAT_WS(' ', first_name, last_name, job_title, department), 'Emily, a research scientist') AS score
+  FROM "people" INNER JOIN "roles" ON "roles"."person_id" = "people"."id" /* loading for pp */
+  ORDER BY score DESC LIMIT $1  [["LIMIT", 1]]
 ```
 ---
 
