@@ -4,8 +4,6 @@ class CreatePeople < ActiveRecord::Migration[7.2]
       t.string :last_name, null: false
       t.string :first_name, null: false
       t.date :birthdate, null: false
-      t.string :job_title, null: false
-      t.string :department
 
       t.timestamps
     end

@@ -189,16 +189,21 @@ people_data.each do |person_data|
     Person.create(
       first_name: person_data[:first_name],
       last_name: person_data[:last_name],
-      birthdate: person_data[:birthdate],
-      job_title: person_data[:job_title],
-      department: person_data[:department]
+      birthdate: person_data[:birthdate]
     )
 
-  # Insert the corresponding Account record
-  Account.create!(
+  # Insert the corresponding Role
+  Role.create!(
     person_id: person.id,
-    username: person_data[:username],
-    email: person_data[:email],
-    enabled: person_data[:enabled]
+    job_title: person_data[:job_title],
+    department: person_data[:department]
   )
+
+  # # Insert the corresponding Account record
+  # Account.create!(
+  #   person_id: person.id,
+  #   username: person_data[:username],
+  #   email: person_data[:email],
+  #   enabled: person_data[:enabled]
+  # )
 end

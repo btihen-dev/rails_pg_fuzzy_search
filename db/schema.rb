@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2024_10_31_124236) do
+ActiveRecord::Schema[7.2].define(version: 2024_10_31_182331) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_trgm"
@@ -32,12 +32,21 @@ ActiveRecord::Schema[7.2].define(version: 2024_10_31_124236) do
     t.string "last_name", null: false
     t.string "first_name", null: false
     t.date "birthdate", null: false
-    t.string "job_title", null: false
-    t.string "department"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["last_name", "first_name", "birthdate"], name: "index_people_on_last_name_and_first_name_and_birthdate", unique: true
   end
 
+  create_table "roles", force: :cascade do |t|
+    t.string "job_title", null: false
+    t.string "department", null: false
+    t.bigint "person_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["person_id", "job_title", "department"], name: "index_roles_on_person_id_and_job_title_and_department", unique: true
+    t.index ["person_id"], name: "index_roles_on_person_id"
+  end
+
   add_foreign_key "accounts", "people"
+  add_foreign_key "roles", "people"
 end
