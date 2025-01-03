@@ -4,6 +4,5 @@ class Person < ApplicationRecord
 
   validates :first_name, presence: true
   validates :last_name, presence: true
-  validates :birthdate, presence: true
-  validates :birthdate, uniqueness: { scope: [:first_name, :last_name] }
+  validates :first_name, uniqueness: { scope: [:last_name] }
 end

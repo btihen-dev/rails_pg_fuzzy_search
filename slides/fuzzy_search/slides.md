@@ -270,4 +270,4 @@ SELECT id, last_name, first_name, similarity(last_name, 'Johns') AS score
 
 ---
 
-# Questions? Discussion
+# Questions and/or Discussion
