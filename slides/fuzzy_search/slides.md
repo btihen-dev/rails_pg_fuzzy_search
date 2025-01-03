@@ -270,4 +270,23 @@ SELECT id, last_name, first_name, similarity(last_name, 'Johns') AS score
 
 ---
 
-# Questions and/or Discussion
+# Summary
+
+An effective fuzzy search easily implemented in Rails with Postgres
+
+**Trigrams:**
+- are fast and efficient
+- are very effective for inexact searches
+- handle mispellings, abbreviations and missing data
+- handle human sentences (when concatenated over multiple columns and/or tables)
+
+**Limitations:**
+- not effective with pronunciation matching
+- not effective with distance (number of changes needed to match) searches
+
+**Additional Resources**
+- [Optimizing Postgres Text Search with Trigrams](https://alexklibisz.com/2022/02/18/optimizing-postgres-trigram-search)
+
+---
+
+# Questions / Discussion
