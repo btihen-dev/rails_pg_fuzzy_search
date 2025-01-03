@@ -53,12 +53,12 @@ people_data = [
   {
     last_name: "Johnson",
     first_name: "Emma",
-    job_title: "Data Scientist",
+    job_title: "Network Engineer",
     birthdate: Date.new(1962, 1, 1),
     enabled: true,
     username: "emmajohnson",
     email: "Emma.Johnson@example.com",
-    department: "Research"
+    department: "Operations"
   },
   {
     last_name: "Johnston",
