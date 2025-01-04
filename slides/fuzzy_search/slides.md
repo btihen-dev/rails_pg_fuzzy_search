@@ -40,8 +40,8 @@ bin/rails db:migrate
 bin/rails db:seed
 
 # code examples at:
-# slides/fuzzy_search/slides.md
-# https://btihen.dev/posts/ruby/rails_7_2_fuzzy_search/
+# cd slides/fuzzy_search (within the above repoisitory - run `npm run dev` or view `slides.md`)
+# https://btihen.dev/posts/ruby/rails_7_2_fuzzy_search/ - (TLDR Section has similar code samples)
 ```
 
 <div class="abs-br m-6 text-xl">
@@ -76,20 +76,29 @@ Full Article: [Rails with Postgres - Fuzzy Searches](https://btihen.dev/posts/ru
 
 ---
 
-# Fuzzy Search Options
+# PG Search Options
 
 Postgres has a several ways to do inexact searches.
 
-1. LIKE / ILIKE (contains)
-2. Trigram Indexes (pg_trgm) - estimates similary of sets of three characters
-3. Phonetic Algorithms - (FuzzyStrMatch, metaphone, soundex) - matches as if read aloud
-4. Distance Algorithms - (levenshtein) edits required to transform into a match
+* [**Trigrams (pg_trgm)**](https://www.postgresql.org/docs/current/pgtrgm.html) - 3-character chunk matches, tolerates of mispellings & missing info
+* [**Full-Text / Document Search**](https://www.postgresql.org/docs/current/textsearch.html) - similar to elastic search (but for PG)
+* [**Pattern Matching**](https://www.postgresql.org/docs/current/functions-matching.html)
+  - _LIKE/ILIKE_ - returns true if the string matches the supplied pattern
+  - _POSIX Regular Expressions (Regex)_ - returns true if the regex pattern is matched
+  - _SIMILAR TO_ - a cross between LIKE and REGEX
+* [**FuzzyStrMatch**](https://www.postgresql.org/docs/current/fuzzystrmatch.html) - sounds like and distance matching
+  - _Soundex_ - matching similar-sounding names (best for English)
+  - _Daitch-Mokotoff Soundex_ - similar to soundex but better for non-English matching
+  - _Levenshtein_ - the distance between two strings (number of edits to make them the same)
+  - _Metaphone_ - like Soundex (but different algorithm)
+  - _Double Metaphone_ - like Metaphone, but creates 2 pronunciations - better with non-English
 
-**Trigrams** are fast and efficient tool for most general fuzzy searches
 
 ---
 
 # PG Trigram Extension (pg_trgm)
+
+**Trigrams** are fast and efficient tool for most 'fuzzy' searches
 
 pg_trgm extension is required
 
@@ -110,9 +119,13 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 ---
 
-# Data Context
+# Fuzzy Search Goal
 
-the data structure:
+We want to find a person using a nickname, incomplete lastname and an incomplete job title
+
+**GOAL:** find `Emilia Johnson` with the search: `Emily John, a research scientist`
+
+Data Structure:
 
 ```ruby
 bin/rails generate model Person last_name:string:index first_name:string:index
@@ -132,13 +145,14 @@ people_data.each do |person_data|
 end
 ```
 
-**GOAL:** to find expected person with a search like: `Emily John, a research scientist`
 
 ---
 
 # Single Table, Single-Column
 
-Default Threshold (cutoff) score is `0.3`
+Using only the last name, is not very impressive (our target person is the 3rd result & **40% certainty**)
+
+Use: `.where("last_name % ?", compare_string)` and `similarity(last_name, compare_string)`
 
 ```ruby
 compare_string = 'John'
@@ -153,26 +167,20 @@ Person.select("id, last_name, first_name, #{similarity_calc} AS score")
  #<Person:0x0000000119138e80 id: 7, last_name: "Johnston", first_name: "Emilia", score: 0.4>]
 
 # SQL version
-SELECT id, last_name, first_name, similarity(last_name, 'Johns') AS score
-  FROM "people" WHERE (last_name % 'Johns') ORDER BY score DESC
-
- id | last_name | first_name |   score
-----+-----------+------------+-----------
-  2 | Johnson   | John       | 0.44444445
-  6 | Johnson   | Emma       | 0.44444445
-  7 | Johnston  | Emilia     |       0.4
+SELECT id, last_name, first_name, similarity(last_name, 'John') AS score
+  FROM "people" WHERE (last_name % 'John') ORDER BY score DESC
 ```
 
 ---
 
 # Rails - Single Table, Multi-Column Search
 
-use **CONCAT_WS** to build a single text from multiple db fields,
+First and last name - top match is our target person, but only a **42% certainty**
 
-i.e.: `CONCAT_WS(' ', first_name, last_name)`
+Use : `CONCAT_WS(' ', first_name, last_name)`
 
 ```ruby
-compare_string = 'Emily Johns'
+compare_string = 'Emily John'
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 concat_fields = "CONCAT_WS(' ', first_name, last_name)"
 similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
@@ -180,43 +188,44 @@ similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
 Person.select("id, last_name, first_name, #{similarity_calc} AS score")
       .where("#{concat_fields} % #{compare_quoted}").order("score DESC")
 
-# we asked for 5 but only 4 matched (because the default threshold is 0.3)
-[#<Person:0x00000001014cba60 id: 7, last_name: "Johnston", first_name: "Emilia", score: 0.47368422>,
- #<Person:0x00000001014cb920 id: 6, last_name: "Johnson", first_name: "Emma", score: 0.3888889>,
- #<Person:0x00000001014cb7e0 id: 2, last_name: "Johnson", first_name: "John", score: 0.3125>]
+[#<Person:0x0000000114c515d8 id: 7, last_name: "Johnston", first_name: "Emilia", score: 0.42105263>,
+ #<Person:0x0000000100a85a10 id: 2, last_name: "Johnson", first_name: "John", score: 0.33333334>,
+ #<Person:0x0000000100a858d0 id: 6, last_name: "Johnson", first_name: "Emma", score: 0.33333334>]
 
 # SQL version
-SELECT id, last_name, first_name, similarity(CONCAT_WS(' ', first_name, last_name), 'Emi John') AS score
-  FROM "people" WHERE (CONCAT_WS(' ', first_name, last_name) % 'Emi John') ORDER BY score DESC
+SELECT id, last_name, first_name, similarity(CONCAT_WS(' ', first_name, last_name), 'Emily John') AS score
+  FROM "people" WHERE (CONCAT_WS(' ', first_name, last_name) % 'Emily John') ORDER BY score DESC
 ```
 
 ---
 
 # Rails - Multi-Table, Multi-Column Search
 
+Let's search across multiple tables and match against names, job titles and departments
+
 Use: `joins(:roles)` & `CONCAT_WS(' ', first_name, last_name, job_title, department)`
 
 ```ruby
-compare_string = 'Emily, a research scientist'
+compare_string = 'Emily John, a research scientist'
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 concat_fields = "CONCAT_WS(' ', first_name, last_name, job_title, department)"
 similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
 
-# with two tables (if we want an accurate id, we need to select which table id we want)
 Person.select("people.id, last_name, first_name, job_title, department, #{similarity_calc} AS score")
       .joins(:roles).where("#{concat_fields} % #{compare_quoted}").order("score DESC")
 
-# we asked for 3 but only 2 matched (because the default threshold is 0.3)
 [#<Person:0x000000012657c818
-  id: 7, last_name: "Johnston", first_name: "Emilia", job_title: "Data Scientist", department: "Research", score: 0.52272725>]
+  id: 7, last_name: "Johnston", first_name: "Emilia", job_title: "Data Scientist", department: "Research", score: 0.6>]
 
 # SQL
 SELECT people.id, last_name, first_name, job_title, department,
-  similarity(CONCAT_WS(' ', first_name, last_name, job_title, department), 'Emily, a research scientist') AS score
+  similarity(CONCAT_WS(' ', first_name, last_name, job_title, department), 'Emily John, a research scientist') AS score
   FROM "people" INNER JOIN "roles" ON "roles"."person_id" = "people"."id"
-  WHERE (CONCAT_WS(' ', first_name, last_name, job_title, department) % 'Emily, a research scientist')
+  WHERE (CONCAT_WS(' ', first_name, last_name, job_title, department) % 'Emily John, a research scientist')
   ORDER BY score DESC
 ```
+
+We found our person - with a **60% certainty** (all other results were below 30% certainty)
 
 ---
 
@@ -224,7 +233,7 @@ SELECT people.id, last_name, first_name, job_title, department,
 
 instead of `where("#{concat_fields} % #{compare_quoted}")`
 
-use `where("#{similarity_calc} > ?", threshold)`
+use format: `where("#{similarity_calc} > ?", threshold)`
 
 ```ruby
 threshold = 0.2
@@ -247,26 +256,32 @@ SELECT id, last_name, first_name, similarity(last_name, 'John') AS score
 ```
 ---
 
-# Best Matches
+# Best Matches & Debugging
 
-dropdown suggestions: drop `where` **add** `limit` the _ordered_ results (for best match: `limit 1`)
+good for auto-suggestion/dropdown suggestions (and query debugging)
+
+Remove the `where` clause _(which reduces the query response time on a large dataset)_
 
 ```ruby
 compare_string = 'John'
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 similarity_calc = "similarity(last_name, #{compare_quoted})"
 
-Person.select("id, last_name, first_name, #{similarity_calc} AS score")
-      .order("score DESC").limit(3)
+Person.select("id, last_name, first_name, #{similarity_calc} AS score").order("score DESC")
 
-[#<Person:0x000000010c4733f0 id: 2, last_name: "Johnson", first_name: "John", score: 0.44444445>,
- #<Person:0x0000000119138fc0 id: 6, last_name: "Johnson", first_name: "Emma", score: 0.44444445>,
- #<Person:0x0000000119138e80 id: 7, last_name: "Johnston", first_name: "Emilia", score: 0.4>]
+[#<Person:0x0000000100ae2a80 id: 6, last_name: "Johnson", first_name: "Emma", score: 0.44444445>,
+ #<Person:0x0000000100ae2940 id: 2, last_name: "Johnson", first_name: "John", score: 0.44444445>,
+ #<Person:0x0000000100ae2800 id: 7, last_name: "Johnston", first_name: "Emilia", score: 0.4>,
+ #<Person:0x0000000100ae26c0 id: 3, last_name: "Johanson", first_name: "Jonathan", score: 0.27272728>,
+ #<Person:0x0000000100ae2580 id: 9, last_name: "Jones", first_name: "Olivia", score: 0.22222222>,
+ #<Person:0x0000000100ae2440 id: 11, last_name: "Davis", first_name: "Ava", score: 0.0>,
+ "..."]
 
 # SQL version
-SELECT id, last_name, first_name, similarity(last_name, 'Johns') AS score
-  FROM "people" ORDER BY score DESC LIMIT 3
+SELECT id, last_name, first_name, similarity(last_name, 'John') AS score FROM "people" ORDER BY score DESC
 ```
+
+Use `limit` to limit return the appropriate number of results
 
 ---
 
@@ -279,14 +294,21 @@ An effective fuzzy search easily implemented in Rails with Postgres
 - are very effective for inexact searches
 - handle mispellings, abbreviations and missing data
 - handle human sentences (when concatenated over multiple columns and/or tables)
+- Three different trigram functions (see docs): `similarity`, `word_similarity` and `strict_word_similarity`
 
 **Limitations:**
-- not effective with pronunciation matching
-- not effective with distance (number of changes needed to match) searches
-
-**Additional Resources**
-- [Optimizing Postgres Text Search with Trigrams](https://alexklibisz.com/2022/02/18/optimizing-postgres-trigram-search)
+- not effective for pronunciation matching
+- not effective for distance matching (number of changes needed to match)
 
 ---
 
-# Questions / Discussion
+# Questions / Comments
+
+Thank you for your time!
+
+## Resources
+
+* [pg_trgm docs](https://www.postgresql.org/docs/current/pgtrgm.html)
+* [Postgres Fuzzy Search (Trigrams)](https://dev.to/moritzrieger/build-a-fuzzy-search-with-postgresql-2029)
+* [Optimizing Postgres Text Search with Trigrams](https://alexklibisz.com/2022/02/18/optimizing-postgres-trigram-search)
+* [Awesome Autocomplete: Trigram Search in Rails and PostgreSQL](https://www.sitepoint.com/awesome-autocomplete-trigram-search-in-rails-and-postgresql/)
