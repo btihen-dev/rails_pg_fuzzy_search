@@ -39,9 +39,10 @@ bin/rails db:create
 bin/rails db:migrate
 bin/rails db:seed
 
-# code examples at:
-# cd slides/fuzzy_search (within the above repoisitory - run `npm run dev` or view `slides.md`)
-# https://btihen.dev/posts/ruby/rails_7_2_fuzzy_search/ - (TLDR Section has similar code samples)
+# open `slides/fuzzy_search/slides.md` in your editor
+# or view with Slidev:
+cd slides/fuzzy_search
+npm run dev
 ```
 
 <div class="abs-br m-6 text-xl">
