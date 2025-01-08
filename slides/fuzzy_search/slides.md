@@ -63,9 +63,8 @@ layoutClass: gap-8
 
 We required finding a record with incomplete information (across multiple columns and tables)
 
-- `LIKE` and `ILIKE` requires precision.
 - Trigram scoring allow for inexact matches _(mispellings, abbreviaions and missing data)_
-- Trigrams are fast and effective **fuzzy** searches
+- Trigrams are fast and effective - (expescially when indexed)
 
 Full Article: [Rails with Postgres - Fuzzy Searches](https://btihen.dev/posts/ruby/rails_7_2_fuzzy_search/)
 
@@ -156,7 +155,9 @@ Using only the last name, is not very impressive (our target person is the 3rd r
 Use: `.where("last_name % ?", compare_string)` and `similarity(last_name, compare_string)`
 
 ```ruby
-compare_string = 'John'
+compare_string = 'Emily John, a research scientist' # []
+compare_string = 'Emily John' # []
+compare_string = 'John' # [John Johnson-44%, Emma Johnson-44, Emilia Johnston-40%]
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 similarity_calc = "similarity(last_name, #{compare_quoted})"
 
@@ -181,7 +182,9 @@ First and last name - top match is our target person, but only a **42% certainty
 Use : `CONCAT_WS(' ', first_name, last_name)`
 
 ```ruby
-compare_string = 'Emily John'
+compare_string = 'Emily John, a research scientist' # []
+compare_string = 'Emily John' # [Emilia Johnson-42%, John Johnston-33%, Emma Johnson-33%]
+compare_string = 'John' # [John Johnson-55%, John Smith-45%]
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 concat_fields = "CONCAT_WS(' ', first_name, last_name)"
 similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
@@ -207,7 +210,10 @@ Let's search across multiple tables and match against names, job titles and depa
 Use: `joins(:roles)` & `CONCAT_WS(' ', first_name, last_name, job_title, department)`
 
 ```ruby
-compare_string = 'Emily John, a research scientist'
+compare_string = 'Emily John, a research scientist' # [Emilia Johnson-60%]
+compare_string = 'a scientist research, John Emily' # [Emilia Johnson-60%]
+compare_string = 'Emily John' # []
+compare_string = 'John' # []
 compare_quoted = ActiveRecord::Base.connection.quote(compare_string)
 concat_fields = "CONCAT_WS(' ', first_name, last_name, job_title, department)"
 similarity_calc = "similarity(#{concat_fields}, #{compare_quoted})"
@@ -291,15 +297,16 @@ Use `limit` to limit return the appropriate number of results
 An effective fuzzy search easily implemented in Rails with Postgres
 
 **Trigrams:**
-- are fast and efficient
-- are very effective for inexact searches
-- handle mispellings, abbreviations and missing data
-- handle human sentences (when concatenated over multiple columns and/or tables)
-- Three different trigram functions (see docs): `similarity`, `word_similarity` and `strict_word_similarity`
+- fast and efficient (especially when indexed)
+- handles human sentences (when searched over multiple columns/tables)
+- effective inexact _fuzzy_ searches (mispellings, abbreviations, missing/extra data)
+- Three search functions (see docs): `similarity`, `word_similarity` and `strict_word_similarity`
 
 **Limitations:**
 - not effective for pronunciation matching
 - not effective for distance matching (number of changes needed to match)
+- ASCII compared to similar extended ASCII characters don't match (ç compared to c, u compared to ü, ...),
+  _but given the fuzzy nature of the search, this is generally not a significant limitation_
 
 ---
 
